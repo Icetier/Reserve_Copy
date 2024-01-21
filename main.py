@@ -147,8 +147,6 @@ token_ya = input(f'Введите токен для Яндекс Диска: ').
 
 token_vk = ''
 
-# token_ya = 'y0_AgAAAAAvHF8DAADLWwAAAAD2TTMSe-345C-_TEa0kpUpoZlSMpQ106o'
-
 user = Client(token_vk, user_id, token_ya)
 photo_list = user.get_profile_photos()
 
