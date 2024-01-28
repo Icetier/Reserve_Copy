@@ -1,3 +1,4 @@
-requests
-datetime
-tqdm
+requests==2.31.0
+datetime==5.4
+tqdm==4.66.1
+configparser==6.0.0
