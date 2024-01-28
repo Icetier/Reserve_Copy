@@ -2,49 +2,78 @@ from urllib.parse import urlencode
 import pprint
 import requests
 import json
+import configparser
 from datetime import datetime
 from tqdm import tqdm
 
 
-class Client:
+class VK:
     api_base_url_vk = 'https://api.vk.com/method/'
-    api_base_url_ya = 'https://cloud-api.yandex.net:443'
 
-    def __init__(self, token_vk, user_id, token_ya):
+    def __init__(self, token_vk, user_id, count, rev=True):
         self.token_vk = token_vk
         self.user_id = user_id
-        self.token_ya = token_ya
+        self.count = count
+        self.rev = rev
+
+    def get_id_by_short_name(self, user_name):
+        url = "https://api.vk.com/method/utils.resolveScreenName"
+        params = {
+            "access_token": token_vk,
+            "v": "5.199",
+            "screen_name": user_name
+        }
+        response = requests.get(url, params=params)
+        if user_name.isdigit():
+            return user_name
+        else:
+            return response.json()['response']['object_id']
 
     def get_profile_photos(self, album_id='profile'):
         params = {'access_token': self.token_vk,
                   'v': '5.199',
-                  'extended': '1'
+                  'extended': '1',
+                  'count': self.count,
+                  'rev': self.rev
                   }
-        params.update({'user_id': self.user_id, 'album_id': album_id})
+        params.update({'user_id': self.user_id, 'album_id': album_id, 'count': self.count})
         response = requests.get(f'{self.api_base_url_vk}/photos.get?{urlencode(params)}')
-        if 200 <= response.status_code < 300:
-            print(f'Доступ к файлам есть, формируем список для резервного копирования')
-            data = response.json()
-            with open('response.json', 'w') as f:
-                json.dump(data, f, ensure_ascii=True, indent=2)
-            photo_list = []
-            likes_str = ''
-            for idx, item in enumerate(data['response']['items']):
-                photo_list.append({'date': datetime.fromtimestamp(item['date']),
-                                   'likes': item['likes']['count']})
-                likes_str += str(item['likes']['count']) + ' '
-                max_type = max_size(item['sizes'])
-                for size in item['sizes']:
-                    if size['type'] == max_type:
-                        photo_list[idx]['url'] = size['url']
-                        photo_list[idx]['size'] = size['type']
-            sort_photo_list = sorted(photo_list, key=lambda x: x['likes'])
-            for photo in sort_photo_list:
-                if likes_str.count(str(photo['likes'])) >= 1:
-                    photo['file_name'] = f'{photo["likes"]}_{photo["date"].strftime("%m.%d.%y_%Hh%Mm%Ss")}.jpg'
-                else:
-                    photo['file_name'] = f'{photo["likes"]}.jpg'
-            return sort_photo_list
+        if isinstance(count, int) or int(count) <= 0:
+            raise TypeError('Количество фотографий должно быть целым положительным числом')
+        else:
+            if 200 <= response.status_code < 300:
+                print(f'Доступ к файлам есть, формируем список для резервного копирования')
+                data = response.json()
+                with open('response.json', 'w') as f:
+                    json.dump(data, f, ensure_ascii=True, indent=2)
+                photo_list = []
+                likes_str = ''
+                for idx, item in enumerate(data['response']['items']):
+                    photo_list.append({'date': datetime.fromtimestamp(item['date']),
+                                       'likes': item['likes']['count']})
+                    likes_str += str(item['likes']['count']) + ' '
+                    max_type = max_size(item['sizes'])
+                    for size in item['sizes']:
+                        if size['type'] == max_type:
+                            photo_list[idx]['url'] = size['url']
+                            photo_list[idx]['size'] = size['type']
+                if len(photo_list) < int(count):
+                    print(f'Будет скопировано лишь {len(photo_list)} фото из требуемых {count}!')
+                    print(f'Причина: у пользователя ВСЕГО {len(photo_list)} фотографий!')
+                sort_photo_list = sorted(photo_list, key=lambda x: x['likes'])
+                for photo in sort_photo_list:
+                    if likes_str.count(str(photo['likes'])) >= 1:
+                        photo['file_name'] = f'{photo["likes"]}_{photo["date"].strftime("%m.%d.%y_%Hh%Mm%Ss")}.jpg'
+                    else:
+                        photo['file_name'] = f'{photo["likes"]}.jpg'
+                return sort_photo_list
+
+
+class YA:
+    api_base_url_ya = 'https://cloud-api.yandex.net:443'
+
+    def __init__(self, token_ya):
+        self.token_ya = token_ya
 
     def check_folder_ya(self):
         headers = {'Authorization': self.token_ya}
@@ -129,6 +158,7 @@ class Client:
                 print(f'Резервное копирование на Яндекс Диск прошло успешно')
 
 
+# region Max Size
 def max_size(items: list):
     max_value = 0
     max_type = ''
@@ -139,36 +169,60 @@ def max_size(items: list):
     return str(max_type)
 
 
-user_id = input(f'Введите id для VK: ').strip()
+# endregion
 
-# token_vk = input(f'Введите токен для VK: ').strip()
+# region Getting Tokens From .ini
+config = configparser.ConfigParser()
+config.read("settings.ini")
 
-token_ya = input(f'Введите токен для Яндекс Диска: ').strip()
+token_vk = config['Vk']['token']
+token_ya = config['Yandex']['token']
+# print(config['Vk']['token'])
+# print(config['Yandex']['token'])
+# endregion
 
-token_vk = ''
+# region Input Data
+f = input(f'Введите id или screen name для VK: ').strip()
+user_id = VK.get_id_by_short_name(1, f)
+count = input(f'Укажите количество фотографий: ').strip()
 
-user = Client(token_vk, user_id, token_ya)
-photo_list = user.get_profile_photos()
+# endregion
 
-json_data = []
-upload_data = []
+# region Getting Photos From Profile
+VK = VK(token_vk, user_id, count)
+YA = YA(token_ya)
+photo_list = VK.get_profile_photos()
 
-for item in photo_list:
-    json_data.append({'file_name': item['file_name'],
-                      'size': item['size']})
-    upload_data.append({'file_name': item['file_name'],
-                        'url': item['url']})
-print(f'Количество фото: {len(photo_list)}')
 
-with open('files_list.json', 'w') as f:
-    json.dump(json_data, f, ensure_ascii=False, indent=2)
-with open('files_list.json') as f:
-    f = json.load(f)
-print('Список фото:')
-pprint.pprint(f)
+# endregion
 
-# print(upload_data)
-user.upload_ya(upload_data)
-upload_data = []
+# region Required Lists
+def json_upload():
+    json_data = []
+    upload_data = []
+
+    for item in photo_list:
+        json_data.append({'file_name': item['file_name'],
+                          'size': item['size']})
+        upload_data.append({'file_name': item['file_name'],
+                            'url': item['url']})
+
+    with open('files_list.json', 'w') as f:
+        json.dump(json_data, f, ensure_ascii=False, indent=2)
+    with open('files_list.json') as f:
+        f = json.load(f)
+    print('Список фото:')
+    pprint.pprint(f)
+    return upload_data
+
+
+# endregion
+
+YA.upload_ya(json_upload())
+
+# region Clean & Finish
+
 open('response.json', 'w').close()
 print(f'https://disk.yandex.ru/client/disk/vk_photos')
+
+# endregion
